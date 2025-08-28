@@ -34,6 +34,9 @@ To play a card it will need to match either the colour
 Blank "P" cards can be place on top of anything.
 Using a "P" card requires picking a colour to change the stack to.
 
+You win when you use up all of your cards.
+You go bust if you acquire more than 20 cards.
+
 Some Cards can have actions which are:
  Sk ~ Skip next user's turn
  Rv ~ Reverse the turn order
@@ -202,6 +205,10 @@ impl UnoClient {
                                                 UnoClientAction::PlayCard(card.card),
                                             )?)
                                             .await?;
+
+                                        if card_idx == my_cards.len() - 1 && card_idx > 0 {
+                                            card_idx -= 1;
+                                        }
 
                                         card_to_play = None;
                                     }
@@ -457,14 +464,31 @@ impl UnoClient {
                 }
             }
             GameStartState::Active => {
+                if server_state.active_users.iter().any(|u| u.id == user_id) {
+                    frame.render_widget(
+                        Paragraph::new("My Cards").block(Block::default().borders(Borders::RIGHT)),
+                        bottom_columns[0],
+                    );
+
+                    Self::my_cards(frame, bottom_columns[0], my_cards, card_idx);
+                } else if server_state
+                    .finished_users
+                    .iter()
+                    .any(|(id, _)| user_id.eq(id))
+                {
+                    frame.render_widget(
+                        Paragraph::new("You're finished!")
+                            .block(Block::default().borders(Borders::RIGHT)),
+                        bottom_columns[0],
+                    );
+                }
+            }
+            GameStartState::Ending => {
                 frame.render_widget(
-                    Paragraph::new("My Cards").block(Block::default().borders(Borders::RIGHT)),
+                    Paragraph::new("Game is over").block(Block::default().borders(Borders::RIGHT)),
                     bottom_columns[0],
                 );
-
-                Self::my_cards(frame, bottom_columns[0], my_cards, card_idx);
             }
-            GameStartState::Ending => {}
         }
 
         // Help

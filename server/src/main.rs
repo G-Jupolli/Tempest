@@ -98,8 +98,6 @@ impl TempestServer {
         }
 
         while let Some(msg) = event_receiver.recv().await {
-            println!("SPINNING {msg:?}");
-
             match msg {
                 ServerIntraMessage::RegisterUser(name, addr, sender) => {
                     last_id += 1;
@@ -119,8 +117,6 @@ impl TempestServer {
                     let _ = event_sender.send(ServerIntraMessage::UpdateUserLobbies);
                 }
                 ServerIntraMessage::Auth(msg) => {
-                    println!("Received Auth Message {msg:?}");
-
                     if let Some(user) = users.get_mut(&msg.user_id) {
                         if user.addr != msg.addr {
                             println!("Received message for user {user:?} on wrong addr {msg:?}",);
@@ -216,6 +212,8 @@ impl TempestServer {
                         }
                     }
                 }
+                // Realistically this would be better if I just sent down the specific
+                // game / user count updates
                 ServerIntraMessage::UpdateUserLobbies => {
                     let lobby_state = ClientLobbyState {
                         player_count: users.len(),
