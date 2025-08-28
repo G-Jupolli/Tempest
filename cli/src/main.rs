@@ -1,12 +1,7 @@
 use anyhow::anyhow;
 use color_eyre::{Result, eyre::Error};
-use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
-use ratatui::{
-    DefaultTerminal, Frame,
-    style::{Style, Stylize},
-    text::Line,
-    widgets::{Block, Paragraph},
-};
+use crossterm::event::{self, Event, KeyCode, KeyEventKind};
+use ratatui::DefaultTerminal;
 use rpc::{
     comms::{ClientAuthedCommand, ClientMessage, ServerMessage, TcpReceiver, TcpSender},
     game_state::GameType,
@@ -17,7 +12,6 @@ use crate::{app_auth::AppAuth, app_lobby::LobbyResult, uno_client::UnoClient};
 
 mod app_auth;
 mod app_lobby;
-mod game_client;
 mod uno_client;
 
 /// This architecture may be a bit off, the main idea is:
@@ -95,21 +89,20 @@ impl App {
 
         Self::start_rpc_receiver(app_sender.clone(), tcp_receiver);
 
-        let mut game_result = GameResult::None;
+        // let mut game_result = GameResult::None;
 
         loop {
             let lobby_result = app_lobby
                 .clone()
-                .start(&mut terminal, &mut app_receiver, GameResult::None)
+                .start(&mut terminal, &mut app_receiver)
                 .await
                 .map_err(|err| Error::msg(err))?;
 
-            match lobby_result {
-                LobbyResult::Exit => break,
-                _ => {}
+            if let LobbyResult::Exit = lobby_result {
+                break;
             }
 
-            game_result = Self::handle_lobby_result(
+            let game_result = Self::handle_lobby_result(
                 app_lobby.id,
                 lobby_result,
                 &mut tcp_sender,
@@ -123,7 +116,7 @@ impl App {
                 GameResult::None | GameResult::NoGame => continue,
                 GameResult::Game(lobby, game_type) => match game_type {
                     GameType::Uno => {
-                        let _x = UnoClient::try_start(
+                        UnoClient::try_start(
                             lobby,
                             app_lobby.name.clone(),
                             app_lobby.id,
@@ -203,8 +196,6 @@ impl App {
                 }
             }
         }
-
-        todo!()
     }
 
     fn start_rpc_receiver(

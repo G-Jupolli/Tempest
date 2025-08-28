@@ -1,5 +1,3 @@
-use std::{cmp::min, io::IntoInnerError};
-
 use anyhow::anyhow;
 use bincode::config::Configuration;
 use crossterm::event::{Event, KeyCode, KeyEventKind};
@@ -8,7 +6,7 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Margin, Rect},
     style::{Color, Style, Stylize},
     text::{Line, Span, Text},
-    widgets::{Block, Borders, Cell, Clear, List, Padding, Paragraph, Row, Table},
+    widgets::{Block, Borders, Cell, Clear, Padding, Paragraph, Row, Table},
 };
 use rpc::{
     comms::{ClientAuthedCommand, ClientGameCommand, ClientMessage, ServerMessage, TcpSender},
@@ -18,6 +16,7 @@ use rpc::{
         UnoClientGameState,
     },
 };
+use std::cmp::min;
 use tokio::sync::mpsc;
 
 use crate::AppMessage;
@@ -79,7 +78,7 @@ impl UnoClient {
         )
         .await;
 
-        let _x = tcp_sender
+        tcp_sender
             .send(&ClientMessage::Authed(
                 user_id,
                 ClientAuthedCommand::Game(ClientGameCommand::Leave),
@@ -209,7 +208,7 @@ impl UnoClient {
                                             playing.clr_idx -= 1;
                                         }
                                     } else {
-                                        if my_cards.len() == 0 {
+                                        if my_cards.is_empty() {
                                             continue;
                                         }
                                         if card_idx == 0 {
@@ -227,7 +226,7 @@ impl UnoClient {
                                             playing.clr_idx += 1;
                                         }
                                     } else {
-                                        if my_cards.len() == 0 {
+                                        if my_cards.is_empty() {
                                             continue;
                                         }
 
@@ -329,8 +328,8 @@ impl UnoClient {
         user_id: u32,
         lobby: &str,
         server_state: &UnoClientGameState,
-        my_cards: &Vec<UnoCard>,
-        events: &Vec<UnoAction>,
+        my_cards: &[UnoCard],
+        events: &[UnoAction],
         card_idx: usize,
     ) {
         let active_user = server_state
@@ -502,7 +501,7 @@ impl UnoClient {
             Paragraph::new(text).block(
                 Block::bordered()
                     .border_style(Style::new().light_blue())
-                    .title_top(Line::from(format!(" Play Card? ")).bold().white())
+                    .title_top(Line::from(" Play Card? ").bold().white())
                     .title_bottom(Line::from(" Esc to return ").bold().white().right_aligned())
                     .bg(Color::Reset)
                     .padding(Padding::horizontal(1)),
@@ -511,7 +510,7 @@ impl UnoClient {
         )
     }
 
-    fn event_list(frame: &mut Frame, area: Rect, events: &Vec<UnoAction>) {
+    fn event_list(frame: &mut Frame, area: Rect, events: &[UnoAction]) {
         let skip = if events.len() > 5 {
             events.len() - 5
         } else {
@@ -569,7 +568,7 @@ impl UnoClient {
             value.to_string()
         };
 
-        let span = Span::from(format!("{} ~ {}", clr_char, value_str));
+        let span = Span::from(format!("{clr_char} ~ {value_str}"));
 
         match colour {
             UnoCardColour::Red => span.light_red(),
@@ -625,7 +624,7 @@ impl UnoClient {
         Table::new(rows, widths).style(Style::default().white())
     }
 
-    fn my_cards(frame: &mut Frame, mut area: Rect, cards: &Vec<UnoCard>, card_idx: usize) {
+    fn my_cards(frame: &mut Frame, mut area: Rect, cards: &[UnoCard], card_idx: usize) {
         for (i, card) in cards.iter().enumerate() {
             let rect = Rect {
                 x: area.x + ((i % 10) * 6) as u16,
@@ -686,7 +685,7 @@ impl UnoClient {
             }
         }
 
-        Paragraph::new(Text::from(format!("{}\n{}", clr_char, value_str))).block(inner_block)
+        Paragraph::new(Text::from(format!("{clr_char}\n{value_str}"))).block(inner_block)
     }
 
     fn render_loading(frame: &mut Frame, user_name: &str, lobby: &str) {

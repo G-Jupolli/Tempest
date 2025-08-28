@@ -294,7 +294,7 @@ impl ServerUno {
             bust_users: self.bust_users.clone(),
         };
 
-        println!("State {:?}", state);
+        println!("State {state:?}");
 
         // I really don't like the amount of copy going on here
         for user in self.active_users.iter() {
@@ -440,12 +440,10 @@ impl ServerUno {
             } else {
                 self.user_turn += 1
             }
+        } else if self.user_turn == 0 {
+            self.user_turn = (self.active_users.len() - 1) as u8;
         } else {
-            if self.user_turn == 0 {
-                self.user_turn = (self.active_users.len() - 1) as u8;
-            } else {
-                self.user_turn -= 1;
-            }
+            self.user_turn -= 1;
         }
     }
 
@@ -577,7 +575,7 @@ impl UnoDeck {
         let mut hand = vec![];
 
         for _ in 0..10 {
-            let pos = rng.random_range(0..DECK_SIZE) as u8;
+            let pos = rng.random_range(0..DECK_SIZE);
 
             hand.push(self.get_card(pos));
         }
@@ -614,7 +612,7 @@ impl UnoDeck {
                     self.discard_deck.1 |= scan_flag;
                     return;
                 }
-                scan_flag = scan_flag << 1;
+                scan_flag <<= 1;
             }
             return;
         }
@@ -630,11 +628,9 @@ impl UnoDeck {
                     self.discard_deck.1 |= check_cursor;
                     return;
                 }
-            } else {
-                if self.discard_deck.0 & check_cursor == 0 {
-                    self.discard_deck.0 |= check_cursor;
-                    return;
-                }
+            } else if self.discard_deck.0 & check_cursor == 0 {
+                self.discard_deck.0 |= check_cursor;
+                return;
             };
         }
 
@@ -649,11 +645,9 @@ impl UnoDeck {
                     self.discard_deck.1 |= check_cursor;
                     return;
                 }
-            } else {
-                if self.discard_deck.0 & check_cursor == 0 {
-                    self.discard_deck.0 |= check_cursor;
-                    return;
-                }
+            } else if self.discard_deck.0 & check_cursor == 0 {
+                self.discard_deck.0 |= check_cursor;
+                return;
             };
         }
 
@@ -695,7 +689,7 @@ impl UnoDeck {
             UnoCardPower::ClrChange
         };
 
-        return UnoCard::encode(true, UnoCardColour::Red, power as u8);
+        UnoCard::encode(true, UnoCardColour::Red, power as u8)
     }
 
     fn card_to_pos(card: UnoCard) -> (u8, u8) {

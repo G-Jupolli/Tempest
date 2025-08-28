@@ -2,7 +2,6 @@ use crate::{connection_receiver::ConnectionReceiver, server_uno::ServerUno};
 use rpc::{
     comms::{ClientAuthedCommand, ClientGameCommand, ClientLobbyState, LobbyGame, ServerMessage},
     game_state::{GameStartState, GameType},
-    uno::UnoCard,
 };
 use std::{collections::HashMap, net::SocketAddr};
 use tokio::sync::mpsc::{self, UnboundedSender};
@@ -70,11 +69,11 @@ pub enum ServerGameCommand {
     Cmd(ClientGameCommand),
 }
 
-pub struct InGameUser {
-    id: u32,
-    name: String,
-    sender: UnboundedSender<ServerMessage>,
-}
+// pub struct InGameUser {
+//     id: u32,
+//     name: String,
+//     sender: UnboundedSender<ServerMessage>,
+// }
 
 impl TempestServer {
     // We need to setup any internal connections and start the main listener for incoming connections
@@ -122,10 +121,7 @@ impl TempestServer {
 
                     if let Some(user) = users.get_mut(&msg.user_id) {
                         if user.addr != msg.addr {
-                            println!(
-                                "Received message for user {:?} on wrong addr {:?}",
-                                user, msg
-                            );
+                            println!("Received message for user {user:?} on wrong addr {msg:?}",);
                             continue;
                         }
 
@@ -189,13 +185,12 @@ impl TempestServer {
                                     })
                                     .inspect_err(|err| {
                                         println!(
-                                            "Failed to send to game channel {} {err:?}",
-                                            game_id
+                                            "Failed to send to game channel {game_id} {err:?}",
                                         );
                                     });
                             }
                             ClientAuthedCommand::JoinGame(game_id) => {
-                                if user.game_id != None {
+                                if user.game_id.is_some() {
                                     println!(
                                         "User tried to Join a game when already in a game {} -> {} : {:?}",
                                         msg.user_id, game_id, user.game_id
@@ -248,7 +243,7 @@ impl TempestServer {
                 ServerIntraMessage::Disconnected(socket_addr) => {
                     users.retain(|_, user| {
                         if user.addr == socket_addr {
-                            println!("Disconnect User {:?}", user);
+                            println!("Disconnect User {user:?}");
                             false
                         } else {
                             true

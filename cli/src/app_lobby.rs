@@ -5,12 +5,12 @@ use ratatui::{
     style::{Style, Stylize},
     symbols::border,
     text::{Line, Span, Text},
-    widgets::{Block, Borders, Cell, List, ListItem, Row, Table},
+    widgets::{Block, Borders, Cell, Row, Table},
 };
 use rpc::{comms::ClientLobbyState, game_state::GameType};
 use tokio::sync::mpsc::UnboundedReceiver;
 
-use crate::{AppMessage, GameResult};
+use crate::AppMessage;
 
 #[derive(Debug, Clone)]
 pub struct AppLobby {
@@ -56,14 +56,10 @@ impl AppLobby {
         }
     }
 
-    /// Need to change this to not be a &mut self
-    /// Can probably just set it to take self and assert
-    ///  that the server must send down fresh state when needed
     pub async fn start(
         mut self,
         terminal: &mut DefaultTerminal,
         app_receiver: &mut UnboundedReceiver<AppMessage>,
-        prev_result: GameResult,
     ) -> anyhow::Result<LobbyResult> {
         terminal.draw(|frame| self.render(frame))?;
         while let Some(message) = app_receiver.recv().await {
@@ -88,7 +84,7 @@ impl AppLobby {
                             // KeyCode::Right => !(),
                             KeyCode::Up => match self.view {
                                 LobbyView::Main(idx) => {
-                                    if self.state.games.len() == 0 {
+                                    if self.state.games.is_empty() {
                                         continue;
                                     }
                                     let new_idx = if idx == 0 {
@@ -102,7 +98,7 @@ impl AppLobby {
                             },
                             KeyCode::Down => match self.view {
                                 LobbyView::Main(idx) => {
-                                    if self.state.games.len() == 0 {
+                                    if self.state.games.is_empty() {
                                         continue;
                                     }
 
@@ -269,8 +265,10 @@ impl AppLobby {
             Constraint::Fill(1),
         ];
 
-        let mut list_border = border::Set::default();
-        list_border.vertical_left = "┆";
+        let list_border = border::Set {
+            vertical_left: "┆",
+            ..Default::default()
+        };
 
         let block = Block::new()
             .title_top(Line::from("Select a Game to join").bold().white())

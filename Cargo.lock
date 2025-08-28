@@ -109,24 +109,11 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "bincode",
- "client",
  "color-eyre",
  "crossterm",
  "futures",
  "ratatui",
  "rpc",
- "tokio",
- "tokio-util",
-]
-
-[[package]]
-name = "client"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "futures",
- "rpc",
- "serde",
  "tokio",
  "tokio-util",
 ]

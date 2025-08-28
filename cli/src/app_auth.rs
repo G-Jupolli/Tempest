@@ -2,10 +2,9 @@ use anyhow::anyhow;
 use crossterm::event::{Event, KeyEventKind};
 use ratatui::{
     DefaultTerminal, Frame,
-    layout::{Constraint, Direction, Layout},
     style::{Style, Stylize},
     text::{Line, Span, Text},
-    widgets::{Block, Borders, Paragraph},
+    widgets::{Block, Paragraph},
 };
 use rpc::comms::{
     ClientLobbyState, ClientMessage, ServerMessage, TcpReceiver, TcpSender, split_stream,
@@ -64,7 +63,7 @@ impl AppAuth {
                         continue;
                     }
 
-                    terminal.draw(|frame| Self::render_loading(frame))?;
+                    terminal.draw(Self::render_loading)?;
 
                     return Self::try_connect(String::from_iter(name), String::from_iter(server))
                         .await;
@@ -183,7 +182,7 @@ impl AppAuth {
         let (mut sender, mut receiver) =
             split_stream::<ClientMessage, ServerMessage>(TcpStream::connect(addr).await?);
 
-        let _ = sender
+        sender
             .send(&ClientMessage::Authenticate(name.clone()))
             .await?;
 
@@ -204,7 +203,7 @@ impl AppAuth {
             }
         }
 
-        return Err(anyhow!("Failed to receive id"));
+        Err(anyhow!("Failed to receive id"))
     }
 
     async fn wait_for_lobby_state(
@@ -220,6 +219,6 @@ impl AppAuth {
             }
         }
 
-        return Err(anyhow!("Failed to receive lobby state"));
+        Err(anyhow!("Failed to receive lobby state"))
     }
 }
