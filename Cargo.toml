@@ -1,0 +1,19 @@
+[workspace]
+members = ["cli", "client", "rpc", "server"]
+resolver = "3"
+
+[workspace.dependencies]
+anyhow = "1.0.99"
+futures = "0.3.31"
+
+[workspace.dependencies.serde]
+version = "1.0.219"
+features = ["derive"]
+
+[workspace.dependencies.tokio]
+version = "1.47.1"
+features = ["full"]
+
+[workspace.dependencies.tokio-util]
+version = "0.7.16"
+features = ["full"]

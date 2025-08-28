@@ -1,0 +1,15 @@
+[package]
+name = "server"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow.workspace = true
+bincode = "2.0.1"
+futures = "0.3.31"
+rand = "0.9.2"
+rpc = { version = "0.1.0", path = "../rpc" }
+serde = { workspace = true, features = ["derive"] }
+tokio = { workspace = true, features = ["full"] }
+tokio-util = { workspace = true, features = ["full"] }
+util = "0.1.3"
