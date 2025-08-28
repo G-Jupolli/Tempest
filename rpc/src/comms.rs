@@ -45,7 +45,7 @@ pub enum ClientAuthedCommand {
 #[derive(Debug, Encode, Decode)]
 pub enum ClientGameCommand {
     Start,
-    End,
+    // End,
     Leave,
     Raw(Vec<u8>),
 }

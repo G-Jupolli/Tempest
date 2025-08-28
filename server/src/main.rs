@@ -19,6 +19,8 @@ pub enum ServerIntraMessage {
     Disconnected(SocketAddr),
     UpdateGameServer(u32, GameServerStateUpdate),
     UserJoinedGame(u32, u32),
+    UserLeftGame(u32, u32),
+    GameFinished(u32),
 }
 
 #[derive(Debug)]
@@ -271,6 +273,47 @@ impl TempestServer {
                         );
                     }
                 }
+                ServerIntraMessage::UserLeftGame(user_id, game_id) => {
+                    let player_count = users.len();
+                    let Some(user) = users.get_mut(&user_id) else {
+                        println!("Got user leave for user that doesn't exist");
+                        continue;
+                    };
+                    if user.game_id.is_none_or(|game| game != game_id) {
+                        println!("Got user leave for user in wrong game");
+                        continue;
+                    }
+                    user.game_id = None;
+
+                    let lobby_state = ClientLobbyState {
+                        player_count,
+                        games: games
+                            .iter()
+                            .filter(|(_, game)| {
+                                game.start_state == GameStartState::Setup && game.player_count < 4
+                            })
+                            .map(|(game_id, game)| LobbyGame {
+                                name: game.name.clone(),
+                                id: *game_id,
+                                game_type: game.game_type,
+                                start_state: game.start_state,
+                                active_players: game.player_count,
+                            })
+                            .collect(),
+                    };
+
+                    let _ = user
+                        .sender
+                        .send(ServerMessage::LobbyState(lobby_state))
+                        .inspect_err(|err| {
+                            println!("Failed to send message to user {user_id} : {err:?}")
+                        });
+                }
+                ServerIntraMessage::GameFinished(game_id) => {
+                    if games.remove(&game_id).is_none() {
+                        println!("Received game end message for game that doesn't exist");
+                    }
+                }
             }
         }
     }
@@ -278,12 +321,5 @@ impl TempestServer {
 
 #[tokio::main]
 async fn main() {
-    // let card = UnoCard(163);
-
-    // let d = card.decode();
-
-    // println!("Card {:?}", d);
-
-    // println!("{:?}", card.is_black());
     TempestServer::start_server().await;
 }

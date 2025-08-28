@@ -53,8 +53,10 @@ pub enum UnoAction {
     UserPlaceCard(String, UnoCard),
     UserPickup(String, u8),
     UserJoined(String),
+    UserLeft(String),
     UserFinished(String),
     UserBust(String),
+    GameEnded,
 }
 
 #[derive(Debug, Encode, Decode, Clone)]
@@ -161,10 +163,7 @@ impl UnoCard {
     // Plus 4    : 0b10000011
     // Clr Change: 0b10000100
     pub fn is_black(self) -> bool {
-        match self.0 & 0b10000111 {
-            0b10000011 | 0b10000100 => true,
-            _ => false,
-        }
+        matches!(self.0 & 0b10000111, 0b10000011 | 0b10000100)
     }
 
     pub fn is_power(self) -> bool {

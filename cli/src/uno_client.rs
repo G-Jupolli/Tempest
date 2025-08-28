@@ -26,6 +26,22 @@ struct PlayCard {
     clr_idx: usize,
 }
 
+const HELP_TEXT: &str = r#"How to play:
+When it's your turn, use the arrow keys to select a card.
+Press enter to select, and then also to confirm your card.
+To play a card it will need to match either the colour
+ or the value of the last played card.
+Blank "P" cards can be place on top of anything.
+Using a "P" card requires picking a colour to change the stack to.
+
+Some Cards can have actions which are:
+ Sk ~ Skip next user's turn
+ Rv ~ Reverse the turn order
+ +2 ~ Next suer takes 2 cards and skips turn
+ +4 ~ Next user takes 4 cards and skips turn
+ Cc ~ Change the colour of the stack
+"#;
+
 pub struct UnoClient;
 
 impl UnoClient {
@@ -59,7 +75,9 @@ impl UnoClient {
                 AppMessage::TerminalEvent(_) => {
                     println!("Impl exit to leave here");
                 }
-                AppMessage::Failure(error) => todo!(),
+                AppMessage::Failure(err) => {
+                    return Err(err);
+                }
             }
         }
 
@@ -119,10 +137,6 @@ impl UnoClient {
         while let Some(msg) = app_receiver.recv().await {
             match msg {
                 AppMessage::RpcEvent(server_message) => match server_message {
-                    // ServerMessage::AuthResponse(_) => todo!(),
-                    // ServerMessage::LobbyState(client_lobby_state) => todo!(),
-                    // ServerMessage::NewPlayerCount(_) => todo!(),
-                    // ServerMessage::JoinedGame(_, game_type) => todo!(),
                     ServerMessage::GameState(items) => {
                         match Self::decode_uno_server_command(items)?.0 {
                             ServerUnoCommand::GameState(uno_cards, mut uno_client_game_state) => {
@@ -137,33 +151,118 @@ impl UnoClient {
                     }
                     _ => {}
                 },
-                AppMessage::TerminalEvent(event) => {
-                    match event {
-                        Event::Key(key_event) => {
-                            if key_event.kind != KeyEventKind::Release {
-                                continue;
-                            }
-                            match key_event.code {
-                                KeyCode::Enter => {
-                                    match server_state.game_state {
-                                        game_state::GameStartState::Setup => {
-                                            if server_state.host_user == user_id {
-                                                let _x = tcp_sender
-                                                    .send(&ClientMessage::Authed(
-                                                        user_id,
-                                                        ClientAuthedCommand::Game(
-                                                            ClientGameCommand::Start,
-                                                        ),
-                                                    ))
-                                                    .await;
-                                            }
+                AppMessage::TerminalEvent(event) => match event {
+                    Event::Key(key_event) => {
+                        if key_event.kind != KeyEventKind::Release {
+                            continue;
+                        }
+                        match key_event.code {
+                            KeyCode::Enter => {
+                                match server_state.game_state {
+                                    game_state::GameStartState::Setup => {
+                                        if server_state.host_user == user_id {
+                                            let _x = tcp_sender
+                                                .send(&ClientMessage::Authed(
+                                                    user_id,
+                                                    ClientAuthedCommand::Game(
+                                                        ClientGameCommand::Start,
+                                                    ),
+                                                ))
+                                                .await;
                                         }
-                                        game_state::GameStartState::Ending => {
-                                            continue;
-                                        }
-                                        game_state::GameStartState::Active => {}
-                                    };
+                                    }
+                                    game_state::GameStartState::Ending => {
+                                        continue;
+                                    }
+                                    game_state::GameStartState::Active => {}
+                                };
 
+                                let is_turn = server_state
+                                    .active_users
+                                    .get(server_state.user_turn as usize)
+                                    .is_some_and(|usr| usr.id == user_id);
+
+                                if !is_turn {
+                                    continue;
+                                }
+
+                                match card_to_play {
+                                    Some(mut card) => {
+                                        if card.card.is_black() {
+                                            card.card = UnoCard::encode(
+                                                true,
+                                                UnoCardColour::from(card.clr_idx as u8),
+                                                card.card.get_value(),
+                                            );
+                                        }
+
+                                        tcp_sender
+                                            .send(&Self::encode_uno_client_command(
+                                                user_id,
+                                                UnoClientAction::PlayCard(card.card),
+                                            )?)
+                                            .await?;
+
+                                        card_to_play = None;
+                                    }
+                                    None => {
+                                        card_to_play = my_cards
+                                            .get(card_idx)
+                                            .copied()
+                                            .map(|card| PlayCard { card, clr_idx: 0 });
+                                    }
+                                }
+                            }
+                            KeyCode::Left => {
+                                if let Some(playing) = &mut card_to_play {
+                                    if playing.clr_idx == 0 {
+                                        playing.clr_idx = 3;
+                                    } else {
+                                        playing.clr_idx -= 1;
+                                    }
+                                } else {
+                                    if my_cards.is_empty() {
+                                        continue;
+                                    }
+                                    if card_idx == 0 {
+                                        card_idx = my_cards.len() - 1;
+                                    } else {
+                                        card_idx -= 1;
+                                    }
+                                }
+                            }
+                            KeyCode::Right => {
+                                if let Some(playing) = &mut card_to_play {
+                                    if playing.clr_idx == 3 {
+                                        playing.clr_idx = 0;
+                                    } else {
+                                        playing.clr_idx += 1;
+                                    }
+                                } else {
+                                    if my_cards.is_empty() {
+                                        continue;
+                                    }
+
+                                    if card_idx >= my_cards.len() - 1 {
+                                        card_idx = 0;
+                                    } else {
+                                        card_idx += 1;
+                                    }
+                                }
+                            }
+                            KeyCode::Up | KeyCode::Down => {
+                                if card_to_play.is_some() || my_cards.len() <= 10 {
+                                    continue;
+                                }
+
+                                if card_idx > 10 {
+                                    card_idx -= 10
+                                } else {
+                                    card_idx = min(my_cards.len() - 1, card_idx + 10)
+                                }
+                            }
+                            KeyCode::Char(c) => {
+                                if c == 'p' {
                                     let is_turn = server_state
                                         .active_users
                                         .get(server_state.user_turn as usize)
@@ -173,125 +272,34 @@ impl UnoClient {
                                         continue;
                                     }
 
-                                    match card_to_play {
-                                        Some(mut card) => {
-                                            if card.card.is_black() {
-                                                card.card = UnoCard::encode(
-                                                    true,
-                                                    UnoCardColour::from(card.clr_idx as u8),
-                                                    card.card.get_value(),
-                                                );
-                                            }
-
-                                            tcp_sender
-                                                .send(&Self::encode_uno_client_command(
-                                                    user_id,
-                                                    UnoClientAction::PlayCard(card.card),
-                                                )?)
-                                                .await?;
-
-                                            card_to_play = None;
-                                        }
-                                        None => {
-                                            card_to_play = my_cards
-                                                .get(card_idx)
-                                                .copied()
-                                                .map(|card| PlayCard { card, clr_idx: 0 });
-                                        }
-                                    }
-                                }
-                                KeyCode::Left => {
-                                    if let Some(playing) = &mut card_to_play {
-                                        if playing.clr_idx == 0 {
-                                            playing.clr_idx = 3;
-                                        } else {
-                                            playing.clr_idx -= 1;
-                                        }
-                                    } else {
-                                        if my_cards.is_empty() {
-                                            continue;
-                                        }
-                                        if card_idx == 0 {
-                                            card_idx = my_cards.len() - 1;
-                                        } else {
-                                            card_idx -= 1;
-                                        }
-                                    }
-                                }
-                                KeyCode::Right => {
-                                    if let Some(playing) = &mut card_to_play {
-                                        if playing.clr_idx == 3 {
-                                            playing.clr_idx = 0;
-                                        } else {
-                                            playing.clr_idx += 1;
-                                        }
-                                    } else {
-                                        if my_cards.is_empty() {
-                                            continue;
-                                        }
-
-                                        if card_idx >= my_cards.len() - 1 {
-                                            card_idx = 0;
-                                        } else {
-                                            card_idx += 1;
-                                        }
-                                    }
-                                }
-                                KeyCode::Up | KeyCode::Down => {
-                                    if card_to_play.is_some() || my_cards.len() <= 10 {
-                                        continue;
-                                    }
-
-                                    if card_idx > 10 {
-                                        card_idx -= 10
-                                    } else {
-                                        card_idx = min(my_cards.len() - 1, card_idx + 10)
-                                    }
-                                }
-                                KeyCode::Char(c) => match c {
-                                    'p' => {
-                                        let is_turn = server_state
-                                            .active_users
-                                            .get(server_state.user_turn as usize)
-                                            .is_some_and(|usr| usr.id == user_id);
-
-                                        if !is_turn {
-                                            continue;
-                                        }
-
-                                        tcp_sender
-                                            .send(&Self::encode_uno_client_command(
-                                                user_id,
-                                                UnoClientAction::PickupCard,
-                                            )?)
-                                            .await?;
-                                    }
-                                    _ => {}
-                                },
-                                // KeyCode::PageUp => todo!(),
-                                // KeyCode::PageDown => todo!(),
-                                KeyCode::Esc => {
-                                    if card_to_play.is_some() {
-                                        card_to_play = None;
-                                    } else {
-                                        return Ok(());
-                                    }
-                                }
-                                _ => {
-                                    continue;
+                                    tcp_sender
+                                        .send(&Self::encode_uno_client_command(
+                                            user_id,
+                                            UnoClientAction::PickupCard,
+                                        )?)
+                                        .await?;
                                 }
                             }
+                            KeyCode::Esc => {
+                                if card_to_play.is_some() {
+                                    card_to_play = None;
+                                } else {
+                                    return Ok(());
+                                }
+                            }
+                            _ => {
+                                continue;
+                            }
                         }
-                        Event::Resize(_, _) => {}
-                        _ => {
-                            continue;
-                        } // Event::FocusGained => todo!(),
-                          // Event::FocusLost => todo!(),
-                          // Event::Mouse(mouse_event) => todo!(),
-                          // Event::Paste(_) => todo!(),
                     }
+                    Event::Resize(_, _) => {}
+                    _ => {
+                        continue;
+                    }
+                },
+                AppMessage::Failure(err) => {
+                    return Err(err);
                 }
-                AppMessage::Failure(error) => {}
             }
 
             terminal.draw(|frame| {
@@ -310,7 +318,7 @@ impl UnoClient {
             })?;
         }
 
-        todo!()
+        Err(anyhow!("Internal Failure 6712354"))
     }
 
     /// Idea for playing field:
@@ -332,21 +340,20 @@ impl UnoClient {
         events: &[UnoAction],
         card_idx: usize,
     ) {
-        let active_user = server_state
-            .active_users
-            .get(server_state.user_turn as usize)
-            .expect("Should have user here");
-
         let turn_name = match server_state.game_state {
             game_state::GameStartState::Setup => " Waiting To Start ".to_string(),
             game_state::GameStartState::Active => {
+                let active_user = server_state
+                    .active_users
+                    .get(server_state.user_turn as usize)
+                    .expect("Should have user here");
                 if active_user.id == user_id {
                     " My Turn ".to_string()
                 } else {
                     format!(" {}'s Turn ", active_user.name)
                 }
             }
-            game_state::GameStartState::Ending => " Ending ".to_string(),
+            game_state::GameStartState::Ending => " Finished ".to_string(),
         };
 
         // Making the Main Container here, and everything will sit inside of it
@@ -388,26 +395,37 @@ impl UnoClient {
             top_columns[0],
         );
 
-        if server_state.game_state == GameStartState::Setup {
-            frame.render_widget(
-                Paragraph::new("Waiting for host\nto start")
-                    .centered()
-                    .block(Block::default().borders(Borders::RIGHT)),
-                top_columns[1],
-            );
-        } else {
-            // Last Card
-            frame.render_widget(
-                Paragraph::new("Last Card").block(Block::default().borders(Borders::RIGHT)),
-                top_columns[1],
-            );
+        match server_state.game_state {
+            GameStartState::Setup => {
+                frame.render_widget(
+                    Paragraph::new("Waiting for host\nto start")
+                        .centered()
+                        .block(Block::default().borders(Borders::RIGHT)),
+                    top_columns[1],
+                );
+            }
+            GameStartState::Active => {
+                // Last Played
+                frame.render_widget(
+                    Paragraph::new("Last Card").block(Block::default().borders(Borders::RIGHT)),
+                    top_columns[1],
+                );
 
-            let mut card_inner = top_columns[1].inner(Margin::new(8, 1));
+                let mut card_inner = top_columns[1].inner(Margin::new(8, 1));
 
-            card_inner.width = 5;
-            card_inner.height = 4;
+                card_inner.width = 5;
+                card_inner.height = 4;
 
-            frame.render_widget(Self::card_text(&server_state.last_card, false), card_inner);
+                frame.render_widget(Self::card_text(&server_state.last_card, false), card_inner);
+            }
+            GameStartState::Ending => {
+                frame.render_widget(
+                    Paragraph::new("Game over\nThank you for playing!")
+                        .centered()
+                        .block(Block::default().borders(Borders::RIGHT)),
+                    top_columns[1],
+                );
+            }
         }
 
         // Events
@@ -420,34 +438,38 @@ impl UnoClient {
             .split(row_chunks[1]);
 
         // Local Cards
-        if server_state.game_state == GameStartState::Setup {
-            if server_state.host_user == user_id {
-                frame.render_widget(
+        match server_state.game_state {
+            GameStartState::Setup => {
+                if server_state.host_user == user_id {
+                    frame.render_widget(
                 Paragraph::new("You can start the game by pressing Enter\nif there are at least two people in the lobby")
                     .centered()
                     .block(Block::default().borders(Borders::RIGHT)),
                 bottom_columns[0],
             );
-            } else {
+                } else {
+                    frame.render_widget(
+                        Paragraph::new("Waiting for the host to start the game")
+                            .centered()
+                            .block(Block::default().borders(Borders::RIGHT)),
+                        bottom_columns[0],
+                    );
+                }
+            }
+            GameStartState::Active => {
                 frame.render_widget(
-                    Paragraph::new("Waiting for the host to start the game")
-                        .centered()
-                        .block(Block::default().borders(Borders::RIGHT)),
+                    Paragraph::new("My Cards").block(Block::default().borders(Borders::RIGHT)),
                     bottom_columns[0],
                 );
-            }
-        } else {
-            frame.render_widget(
-                Paragraph::new("My Cards").block(Block::default().borders(Borders::RIGHT)),
-                bottom_columns[0],
-            );
 
-            Self::my_cards(frame, bottom_columns[0], my_cards, card_idx);
+                Self::my_cards(frame, bottom_columns[0], my_cards, card_idx);
+            }
+            GameStartState::Ending => {}
         }
 
         // Help
         frame.render_widget(
-            Paragraph::new("Help\nContent here").block(Block::default()),
+            Paragraph::new(HELP_TEXT).block(Block::default()),
             bottom_columns[1],
         );
     }
@@ -534,8 +556,10 @@ impl UnoClient {
                     Line::from(format!("{user} picked up {count} card(s) "))
                 }
                 UnoAction::UserJoined(user) => Line::from(format!("{user} Joined ")),
+                UnoAction::UserLeft(user) => Line::from(format!("{user} Left ")),
                 UnoAction::UserFinished(user) => Line::from(format!("{user} Finished ")),
                 UnoAction::UserBust(user) => Line::from(format!("{user} Bust ")),
+                UnoAction::GameEnded => Line::from("Game Over"),
             })
             .collect();
 
@@ -587,7 +611,7 @@ impl UnoClient {
             .enumerate()
             .map(|(i, (_, name))| {
                 Row::new(vec![
-                    Cell::new(i.to_string()).light_green(),
+                    Cell::new((i + 1).to_string()).light_green(),
                     Cell::new(name.to_string()).light_green(),
                 ])
             })

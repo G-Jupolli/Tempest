@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use anyhow::anyhow;
 use bincode::config::Configuration;
 use rand::Rng;
@@ -32,6 +34,7 @@ pub struct ServerUno {
     active_users: Vec<UnoUser>,
     finished_users: Vec<(u32, String)>,
     bust_users: Vec<(u32, String)>,
+    user_senders: HashMap<u32, UnboundedSender<ServerMessage>>,
     last_card: UnoCard,
     host_user: u32,
     user_turn: u8,
@@ -44,7 +47,6 @@ pub struct ServerUno {
 struct UnoUser {
     id: u32,
     name: String,
-    sender: UnboundedSender<ServerMessage>,
     cards: Vec<UnoCard>,
 }
 
@@ -78,9 +80,11 @@ impl ServerUno {
         let host_player = UnoUser {
             id: host_id,
             name: host.name.clone(),
-            sender: host.sender.clone(),
             cards: deck.get_new_hand(&mut rng)?,
         };
+
+        let mut user_senders = HashMap::new();
+        user_senders.insert(host_id, host.sender.clone());
 
         let state = GameServerState {
             name: lobby_name.clone(),
@@ -108,6 +112,7 @@ impl ServerUno {
                 is_ord: true,
                 start_state: GameStartState::Setup,
                 action: vec![UnoAction::Init],
+                user_senders,
             };
 
             server.start_server(receive_channel, service_sender).await;
@@ -131,13 +136,15 @@ impl ServerUno {
                         continue;
                     }
 
-                    let user = UnoUser::new_joiner(&mut self.deck, msg.user_id, user);
+                    let (user, user_sender) =
+                        UnoUser::new_joiner(&mut self.deck, msg.user_id, user);
 
-                    let _x = user.sender.send(ServerMessage::JoinedGame(
+                    let _x = user_sender.send(ServerMessage::JoinedGame(
                         self.lobby_name.clone(),
                         GameType::Uno,
                     ));
 
+                    self.user_senders.insert(user.id, user_sender);
                     self.action.push(UnoAction::UserJoined(user.name.clone()));
                     self.active_users.push(user);
 
@@ -146,31 +153,12 @@ impl ServerUno {
                     let _x = service_sender
                         .send(ServerIntraMessage::UserJoinedGame(msg.user_id, self.id));
 
-                    let _x = service_sender.send(ServerIntraMessage::UpdateGameServer(
-                        self.id,
-                        GameServerStateUpdate {
-                            name: self.lobby_name.clone(),
-                            player_count: self.active_users.len() as u32,
-                            game_type: GameType::Uno,
-                            start_state: self.start_state,
-                        },
-                    ));
+                    let _x = service_sender.send(self.service_update_state());
 
                     continue;
                 }
                 ServerGameCommand::Cmd(cmd) => cmd,
             };
-
-            let Some(user_idx) = self
-                .active_users
-                .iter()
-                .position(|user| user.id == msg.user_id)
-            else {
-                println!("Received message for user not in game {}", msg.user_id);
-                continue;
-            };
-
-            let user_idx = user_idx as u8;
 
             match cmd {
                 ClientGameCommand::Start => {
@@ -183,19 +171,21 @@ impl ServerUno {
                         continue;
                     }
                     self.start_state = GameStartState::Active;
-                    let _x = service_sender.send(ServerIntraMessage::UpdateGameServer(
-                        self.id,
-                        GameServerStateUpdate {
-                            name: self.lobby_name.clone(),
-                            player_count: self.active_users.len() as u32,
-                            game_type: GameType::Uno,
-                            start_state: self.start_state,
-                        },
-                    ));
+                    let _x = service_sender.send(self.service_update_state());
                     self.update_user_state();
                 }
-                ClientGameCommand::End => todo!("Implement Game Early end"),
                 ClientGameCommand::Raw(raw_data) => {
+                    let Some(user_idx) = self
+                        .active_users
+                        .iter()
+                        .position(|user| user.id == msg.user_id)
+                    else {
+                        println!("Received message for user not in game {}", msg.user_id);
+                        continue;
+                    };
+
+                    let user_idx = user_idx as u8;
+
                     let Ok((action, _)) =
                         bincode::decode_from_slice::<UnoClientAction, Configuration>(
                             &raw_data,
@@ -261,11 +251,61 @@ impl ServerUno {
                         }
                     }
                 }
-                ClientGameCommand::Leave => todo!(),
+                ClientGameCommand::Leave => {
+                    if let Some(user_idx) = self
+                        .active_users
+                        .iter()
+                        .position(|user| user.id == msg.user_id)
+                    {
+                        let user = self.active_users.remove(user_idx);
+
+                        self.action.push(UnoAction::UserLeft(user.name.clone()));
+
+                        if self.start_state != GameStartState::Setup {
+                            self.bust_users.push((user.id, user.name));
+                        }
+                    } else if let Some((_, user)) = self
+                        .finished_users
+                        .iter()
+                        .find(|(u_id, _)| msg.user_id.eq(u_id))
+                    {
+                        self.action.push(UnoAction::UserLeft(user.clone()));
+                    } else if let Some((_, user)) = self
+                        .bust_users
+                        .iter()
+                        .find(|(u_id, _)| msg.user_id.eq(u_id))
+                    {
+                        self.action.push(UnoAction::UserLeft(user.clone()));
+                    };
+
+                    let _ = self.user_senders.remove(&msg.user_id);
+                    self.check_over();
+
+                    let _x =
+                        service_sender.send(ServerIntraMessage::UserLeftGame(msg.user_id, self.id));
+                    let _x = service_sender.send(self.service_update_state());
+                }
+            }
+
+            // Nobody is in the server at this point
+            if self.user_senders.is_empty() {
+                break;
             }
         }
 
-        todo!("Impl sever finishing");
+        let _ = service_sender.send(ServerIntraMessage::GameFinished(self.id));
+    }
+
+    fn service_update_state(&self) -> ServerIntraMessage {
+        ServerIntraMessage::UpdateGameServer(
+            self.id,
+            GameServerStateUpdate {
+                name: self.lobby_name.clone(),
+                player_count: self.active_users.len() as u32,
+                game_type: GameType::Uno,
+                start_state: self.start_state,
+            },
+        )
     }
 
     fn update_user_state(&mut self) {
@@ -294,32 +334,29 @@ impl ServerUno {
             bust_users: self.bust_users.clone(),
         };
 
-        println!("State {state:?}");
+        for (user_id, sender) in self.user_senders.iter() {
+            let user_cards = if self.start_state == GameStartState::Active {
+                self.active_users
+                    .iter()
+                    .find(|u| u.id.eq(user_id))
+                    .map(|u| u.cards.clone())
+                    .unwrap_or_default()
+            } else {
+                vec![]
+            };
 
-        // I really don't like the amount of copy going on here
-        for user in self.active_users.iter() {
-            let user_message = ServerUnoCommand::GameState(
-                if self.start_state == GameStartState::Setup {
-                    vec![]
-                } else {
-                    user.cards.clone()
-                },
-                state.clone(),
-            );
+            let msg = ServerUnoCommand::GameState(user_cards, state.clone());
 
-            let Ok(game_state) = bincode::encode_to_vec(&user_message, bincode::config::standard())
-                .inspect_err(|err| {
-                    println!("Failed to encode state for user {} : {err:?}", user.id)
-                })
+            let Ok(encoded) = bincode::encode_to_vec(&msg, bincode::config::standard())
+                .inspect_err(|err| println!("Failed to encode state for user {user_id} : {err:?}"))
             else {
                 continue;
             };
 
-            let _x = user
-                .sender
-                .send(ServerMessage::GameState(game_state))
+            let _x = sender
+                .send(ServerMessage::GameState(encoded))
                 .inspect_err(|err| {
-                    println!("Failed to send state to user {} : {err:?}", user.id);
+                    println!("Failed to send state to user {user_id} : {err:?}");
                 });
         }
     }
@@ -343,6 +380,7 @@ impl ServerUno {
             match UnoCardPower::from(value) {
                 UnoCardPower::PlusTwo | UnoCardPower::Skip | UnoCardPower::Reverse => {}
                 UnoCardPower::ClrChange | UnoCardPower::PlusFour => {
+                    println!("CHANGE COLOUR FOR BLACK CARD");
                     card = UnoCard::encode(is_power, UnoCardColour::Red, value);
                     colour = UnoCardColour::Red;
                 }
@@ -491,12 +529,20 @@ impl ServerUno {
         let curr_idx = self.user_turn as usize;
 
         if curr_idx == self.active_users.len() {
-            self.user_turn = curr_idx as u8;
+            self.user_turn = curr_idx as u8 - 1;
         } else if curr_idx > user_idx {
             self.user_turn -= 1;
         }
 
+        self.check_over();
+    }
+
+    fn check_over(&mut self) {
         if self.active_users.len() <= 1 {
+            for user in self.active_users.drain(..) {
+                self.finished_users.push((user.id, user.name));
+            }
+            self.action.push(UnoAction::GameEnded);
             self.start_state = GameStartState::Ending;
         }
     }
@@ -715,14 +761,20 @@ impl UnoDeck {
 }
 
 impl UnoUser {
-    fn new_joiner(deck: &mut UnoDeck, user_id: u32, user: PlayerState) -> UnoUser {
-        UnoUser {
-            id: user_id,
-            name: user.name,
-            sender: user.sender,
-            cards: deck
-                .get_new_hand(&mut rand::rng())
-                .expect("Should be able to fmt deck here"),
-        }
+    fn new_joiner(
+        deck: &mut UnoDeck,
+        user_id: u32,
+        user: PlayerState,
+    ) -> (UnoUser, UnboundedSender<ServerMessage>) {
+        (
+            UnoUser {
+                id: user_id,
+                name: user.name,
+                cards: deck
+                    .get_new_hand(&mut rand::rng())
+                    .expect("Should be able to fmt deck here"),
+            },
+            user.sender.clone(),
+        )
     }
 }

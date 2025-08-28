@@ -80,8 +80,6 @@ impl AppLobby {
                         && key_event.kind == KeyEventKind::Release
                     {
                         match key_event.code {
-                            // KeyCode::Left => !(),
-                            // KeyCode::Right => !(),
                             KeyCode::Up => match self.view {
                                 LobbyView::Main(idx) => {
                                     if self.state.games.is_empty() {
@@ -112,15 +110,14 @@ impl AppLobby {
                                 LobbyView::Create(_) => {}
                             },
                             KeyCode::Char(c) => match &mut self.view {
-                                LobbyView::Main(_) => match c {
-                                    'c' => {
+                                LobbyView::Main(_) => {
+                                    if c == 'c' {
                                         self.view = LobbyView::Create(GameCreate {
                                             name: vec![],
                                             game_type: GameType::Uno,
                                         })
                                     }
-                                    _ => {}
-                                },
+                                }
                                 LobbyView::Create(create) => {
                                     create.name.push(c);
                                 }
@@ -142,7 +139,6 @@ impl AppLobby {
                                 }
                             },
 
-                            // KeyCode::Tab => !(),
                             KeyCode::Esc => match self.view {
                                 LobbyView::Main(_) => break,
                                 LobbyView::Create(_) => self.view = LobbyView::Main(0),
@@ -221,11 +217,14 @@ impl AppLobby {
             .constraints([Constraint::Length(44), Constraint::Fill(1)])
             .split(inner);
 
-        let mut main_text = Text::from("Welcome to Tempest!");
-        main_text.push_line(Line::from(""));
-        main_text.push_line(Line::from("Press \"c\" to create a new game"));
-        main_text.push_line(Line::from("Press Up / Down to chose a game to join"));
-        main_text.push_line(Line::from("Press Enter to join a selected game"));
+        let main_text = Text::from(
+            r#"Welcome to Tempest!
+
+Press "c" to create a new game
+Press Up / Down to chose a game to join
+Press Enter to join a selected game
+"#,
+        );
 
         frame.render_widget(main_text, chunks[0]);
         frame.render_widget(self.game_list(idx), chunks[1]);
