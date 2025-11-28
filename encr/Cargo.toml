@@ -1,0 +1,12 @@
+[package]
+name = "encr"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+snow = { version = "0.10.0", features = ["ring-accelerated"] }
+anyhow = { workspace = true }
+bincode = { workspace = true }
+tokio = { workspace = true }
+tokio-util = { workspace = true }
+futures = { workspace = true }

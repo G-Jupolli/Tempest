@@ -1,9 +1,10 @@
 [workspace]
-members = ["cli", "rpc", "server"]
+members = ["cli", "encr", "rpc", "server"]
 resolver = "3"
 
 [workspace.dependencies]
 anyhow = "1.0.99"
+bincode = "2.0.1"
 futures = "0.3.31"
 
 [workspace.dependencies.serde]
