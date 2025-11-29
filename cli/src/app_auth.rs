@@ -1,15 +1,14 @@
 use anyhow::anyhow;
 use crossterm::event::{Event, KeyEventKind};
+use encr::{EncryptedClient, EncryptedReceiver, EncryptedSender};
 use ratatui::{
     DefaultTerminal, Frame,
     style::{Style, Stylize},
     text::{Line, Span, Text},
     widgets::{Block, Paragraph},
 };
-use rpc::comms::{
-    ClientLobbyState, ClientMessage, ServerMessage, TcpReceiver, TcpSender, split_stream,
-};
-use tokio::{net::TcpStream, sync::mpsc::UnboundedReceiver};
+use rpc::comms::{ClientLobbyState, ClientMessage, ServerMessage};
+use tokio::sync::mpsc::UnboundedReceiver;
 
 use crate::{AppMessage, app_lobby::AppLobby};
 
@@ -21,8 +20,8 @@ impl AppAuth {
         receiver: &mut UnboundedReceiver<AppMessage>,
     ) -> anyhow::Result<(
         AppLobby,
-        TcpSender<ClientMessage>,
-        TcpReceiver<ServerMessage>,
+        EncryptedSender<ClientMessage>,
+        EncryptedReceiver<ServerMessage>,
     )> {
         let mut name: Vec<char> = vec![];
         let mut server: Vec<char> = vec![];
@@ -170,8 +169,8 @@ impl AppAuth {
         server: String,
     ) -> anyhow::Result<(
         AppLobby,
-        TcpSender<ClientMessage>,
-        TcpReceiver<ServerMessage>,
+        EncryptedSender<ClientMessage>,
+        EncryptedReceiver<ServerMessage>,
     )> {
         let addr = if server.is_empty() {
             "127.0.0.1:9000".to_string()
@@ -179,22 +178,26 @@ impl AppAuth {
             server
         };
 
-        let (mut sender, mut receiver) =
-            split_stream::<ClientMessage, ServerMessage>(TcpStream::connect(addr).await?);
+        let mut client = EncryptedClient::<ClientMessage, ServerMessage>::connect(&addr).await?;
 
-        sender
+        client
+            .sender
             .send(&ClientMessage::Authenticate(name.clone()))
             .await?;
 
-        let id = Self::wait_for_auth(&mut receiver).await?;
-        let lobby_state = Self::wait_for_lobby_state(&mut receiver).await?;
+        let id = Self::wait_for_auth(&mut client.receiver).await?;
+        let lobby_state = Self::wait_for_lobby_state(&mut client.receiver).await?;
 
-        Ok((AppLobby::new(name, id, lobby_state), sender, receiver))
+        Ok((
+            AppLobby::new(name, id, lobby_state),
+            client.sender,
+            client.receiver,
+        ))
     }
 
-    async fn wait_for_auth(receiver: &mut TcpReceiver<ServerMessage>) -> anyhow::Result<u32> {
-        while let Some(msg) = receiver.next_message().await {
-            let (msg, _) = msg?;
+    async fn wait_for_auth(receiver: &mut EncryptedReceiver<ServerMessage>) -> anyhow::Result<u32> {
+        loop {
+            let msg = receiver.recv().await?;
 
             if let ServerMessage::AuthResponse(id) = msg {
                 return Ok(id);
@@ -202,15 +205,13 @@ impl AppAuth {
                 println!("Received pointless command {msg:?}");
             }
         }
-
-        Err(anyhow!("Failed to receive id"))
     }
 
     async fn wait_for_lobby_state(
-        receiver: &mut TcpReceiver<ServerMessage>,
+        receiver: &mut EncryptedReceiver<ServerMessage>,
     ) -> anyhow::Result<ClientLobbyState> {
-        while let Some(msg) = receiver.next_message().await {
-            let (msg, _) = msg?;
+        loop {
+            let msg = receiver.recv().await?;
 
             if let ServerMessage::LobbyState(state) = msg {
                 return Ok(state);
@@ -218,7 +219,5 @@ impl AppAuth {
                 println!("Received pointless command {msg:?}");
             }
         }
-
-        Err(anyhow!("Failed to receive lobby state"))
     }
 }

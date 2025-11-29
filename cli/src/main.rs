@@ -1,9 +1,10 @@
 use anyhow::anyhow;
 use color_eyre::{Result, eyre::Error};
 use crossterm::event::{self, Event, KeyCode, KeyEventKind};
+use encr::{EncryptedReceiver, EncryptedSender};
 use ratatui::DefaultTerminal;
 use rpc::{
-    comms::{ClientAuthedCommand, ClientMessage, ServerMessage, TcpReceiver, TcpSender},
+    comms::{ClientAuthedCommand, ClientMessage, ServerMessage},
     game_state::GameType,
 };
 use tokio::sync::mpsc;
@@ -137,7 +138,7 @@ impl App {
     async fn handle_lobby_result(
         user_id: u32,
         lobby_result: LobbyResult,
-        tcp_sender: &mut TcpSender<ClientMessage>,
+        tcp_sender: &mut EncryptedSender<ClientMessage>,
         app_receiver: &mut mpsc::UnboundedReceiver<AppMessage>,
     ) -> anyhow::Result<GameResult> {
         match lobby_result {
@@ -200,12 +201,12 @@ impl App {
 
     fn start_rpc_receiver(
         event_submitter: mpsc::UnboundedSender<AppMessage>,
-        mut receiver: TcpReceiver<ServerMessage>,
+        mut receiver: EncryptedReceiver<ServerMessage>,
     ) {
         tokio::spawn(async move {
-            while let Some(msg) = receiver.next_message().await {
-                let msg = match msg {
-                    Ok((msg, _)) => msg,
+            loop {
+                let msg = match receiver.recv().await {
+                    Ok(msg) => msg,
                     Err(err) => {
                         println!("{err:?}");
                         break;

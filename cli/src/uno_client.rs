@@ -1,6 +1,7 @@
 use anyhow::anyhow;
 use bincode::config::Configuration;
 use crossterm::event::{Event, KeyCode, KeyEventKind};
+use encr::EncryptedSender;
 use ratatui::{
     DefaultTerminal, Frame,
     layout::{Constraint, Direction, Layout, Margin, Rect},
@@ -9,7 +10,7 @@ use ratatui::{
     widgets::{Block, Borders, Cell, Clear, Padding, Paragraph, Row, Table},
 };
 use rpc::{
-    comms::{ClientAuthedCommand, ClientGameCommand, ClientMessage, ServerMessage, TcpSender},
+    comms::{ClientAuthedCommand, ClientGameCommand, ClientMessage, ServerMessage},
     game_state::{self, GameStartState},
     uno::{
         ServerUnoCommand, UnoAction, UnoCard, UnoCardColour, UnoCardPower, UnoClientAction,
@@ -52,7 +53,7 @@ impl UnoClient {
         lobby: String,
         user_name: String,
         user_id: u32,
-        tcp_sender: &mut TcpSender<ClientMessage>,
+        tcp_sender: &mut EncryptedSender<ClientMessage>,
         app_receiver: &mut mpsc::UnboundedReceiver<AppMessage>,
         terminal: &mut DefaultTerminal,
     ) -> anyhow::Result<()> {
@@ -114,7 +115,7 @@ impl UnoClient {
         user_id: u32,
         mut server_state: UnoClientGameState,
         mut my_cards: Vec<UnoCard>,
-        tcp_sender: &mut TcpSender<ClientMessage>,
+        tcp_sender: &mut EncryptedSender<ClientMessage>,
         app_receiver: &mut mpsc::UnboundedReceiver<AppMessage>,
         terminal: &mut DefaultTerminal,
     ) -> anyhow::Result<()> {
@@ -593,7 +594,7 @@ impl UnoClient {
         );
     }
 
-    fn card_for_event(card: &UnoCard) -> Span {
+    fn card_for_event(card: &UnoCard) -> Span<'_> {
         let (power, colour, value) = card.decode();
 
         let clr_char = match colour {
@@ -626,7 +627,7 @@ impl UnoClient {
         }
     }
 
-    fn user_list(server_state: &UnoClientGameState) -> Table {
+    fn user_list(server_state: &UnoClientGameState) -> Table<'_> {
         let idx = server_state.user_turn as usize;
 
         let mut rows: Vec<Row<'_>> = server_state
@@ -693,7 +694,7 @@ impl UnoClient {
         frame.render_widget(Paragraph::new("v").bold().white(), area);
     }
 
-    fn card_text(card: &UnoCard, allow_black: bool) -> Paragraph {
+    fn card_text(card: &UnoCard, allow_black: bool) -> Paragraph<'_> {
         let (power, colour, value) = card.decode();
 
         let clr_char = if allow_black && card.is_black() {
