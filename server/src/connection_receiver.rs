@@ -1,7 +1,7 @@
-use rpc::comms::{ClientMessage, ServerMessage, TcpReceiver, TcpSender, split_stream};
+use encr::{EncryptedReceiver, EncryptedSender, EncryptedServer};
+use rpc::comms::{ClientMessage, ServerMessage};
 use std::{net::SocketAddr, time::Duration};
 use tokio::{
-    net::{TcpListener, TcpStream},
     sync::mpsc::{self, UnboundedReceiver},
     time::sleep,
 };
@@ -22,48 +22,44 @@ impl ConnectionReceiver {
         event_sender: mpsc::UnboundedSender<ServerIntraMessage>,
     ) -> anyhow::Result<()> {
         println!("Now try listen");
-        let listener = TcpListener::bind("127.0.0.1:9000").await?;
+        let server =
+            EncryptedServer::<ServerMessage, ClientMessage>::bind("127.0.0.1:9000").await?;
 
         println!("Listening On 127.0.0.1:9000");
 
         loop {
-            // This stream is to receive messages
-            let (stream, remote_addr) = listener.accept().await?;
-
-            ConnectionNode::handle_connection_node(stream, remote_addr, event_sender.clone());
+            let (client, remote_addr) = server.accept().await?;
+            ConnectionNode::handle_connection_node(client, remote_addr, event_sender.clone());
         }
     }
 }
 
 impl ConnectionNode {
     fn handle_connection_node(
-        stream: TcpStream,
+        client: encr::ClientConnection<ServerMessage, ClientMessage>,
         remote_addr: SocketAddr,
         event_sender: mpsc::UnboundedSender<ServerIntraMessage>,
     ) {
         tokio::spawn(async move {
-            ConnectionNode::start_connection_node(stream, remote_addr, event_sender).await;
+            ConnectionNode::start_connection_node(client, remote_addr, event_sender).await;
         });
     }
 
     async fn start_connection_node(
-        stream: TcpStream,
+        mut client: encr::ClientConnection<ServerMessage, ClientMessage>,
         client_addr: SocketAddr,
         event_sender: mpsc::UnboundedSender<ServerIntraMessage>,
     ) {
         println!("Received client connection from {client_addr}");
 
-        let (tcp_sender, mut tcp_receiver) = split_stream::<ServerMessage, ClientMessage>(stream);
-
         // On an incoming connection, we wait for the user to send auth
         // on failure or timeout we send down an error message and then close the connection
         let name = tokio::select! {
             _ = sleep(CONNECTION_TIMEOUT_INTERVAL) => {
-                // let err = ServiceCommand::Error(400, "Auth Timeout".to_string());
                 println!("Auth timeout on {client_addr}, close connection");
                 None
             }
-            name = Self::wait_for_name(&mut tcp_receiver) => {
+            name = Self::wait_for_name(&mut client.receiver) => {
                 println!("Received Some name {name:?}");
                 name.ok()
             }
@@ -90,9 +86,11 @@ impl ConnectionNode {
             // REMOVE THIS AND HANDLE IT BETTER
             .unwrap();
 
-        Self::start_sender_loop(tcp_sender, sender_channel);
+        Self::start_sender_loop(client.sender, sender_channel);
 
-        while let Some(Ok((msg, _))) = tcp_receiver.next_message().await {
+        while let Ok(msg) = client.receiver.recv().await.inspect_err(|err| {
+            println!("Failed when receiving message from client {err:?}");
+        }) {
             match msg {
                 ClientMessage::Authenticate(name) => {
                     println!("Client sent authenticate for no reason with name {name}");
@@ -116,20 +114,24 @@ impl ConnectionNode {
         let _ = event_sender.send(ServerIntraMessage::Disconnected(client_addr));
     }
 
-    async fn wait_for_name(receiver: &mut TcpReceiver<ClientMessage>) -> anyhow::Result<String> {
-        while let Some(Ok((msg, _))) = receiver.next_message().await {
-            if let ClientMessage::Authenticate(name) = msg {
-                return Ok(name);
-            } else {
-                println!("Received pointless message at this point {msg:?}");
-            };
+    async fn wait_for_name(
+        receiver: &mut EncryptedReceiver<ClientMessage>,
+    ) -> anyhow::Result<String> {
+        // Not convinced a loop is correct here
+        // I may assert the authenticate message should be first or close the connection
+        loop {
+            match receiver.recv().await {
+                Ok(ClientMessage::Authenticate(name)) => return Ok(name),
+                Ok(msg) => {
+                    println!("Received pointless message at this point {msg:?}");
+                }
+                Err(err) => return Err(err),
+            }
         }
-
-        Err(anyhow::anyhow!("Connection closed"))
     }
 
     fn start_sender_loop(
-        mut sender: TcpSender<ServerMessage>,
+        mut sender: EncryptedSender<ServerMessage>,
         mut channel: UnboundedReceiver<ServerMessage>,
     ) {
         tokio::spawn(async move {
@@ -140,15 +142,4 @@ impl ConnectionNode {
             }
         });
     }
-
-    // fn start_receiver_loop(
-    //     mut receiver: TcpReceiver<ClientMessage>,
-    //     mut intra_sender: UnboundedSender<ServerIntraMessage>,
-    //     client_addr: SocketAddr,
-    // ) {
-    //     tokio::spawn(async move {
-    //     });
-    // }
-
-    // async fn loop_on_node(mut receiver: TcpReceiver) {}
 }
