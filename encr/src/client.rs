@@ -9,12 +9,12 @@ use tokio_util::codec::{Framed, LengthDelimitedCodec};
 static PARAMS: LazyLock<snow::params::NoiseParams> =
     LazyLock::new(|| "Noise_XX_25519_ChaChaPoly_BLAKE2s".parse().unwrap());
 
-pub struct EncryptedClient<T: Encode + Decode<()>> {
-    pub sender: EncryptedSender<T>,
-    pub receiver: EncryptedReceiver<T>,
+pub struct EncryptedClient<S: Encode, R: Decode<()>> {
+    pub sender: EncryptedSender<S>,
+    pub receiver: EncryptedReceiver<R>,
 }
 
-impl<T: Encode + Decode<()>> EncryptedClient<T> {
+impl<S: Encode, R: Decode<()>> EncryptedClient<S, R> {
     pub async fn connect(addr: &str) -> Result<Self> {
         let stream = TcpStream::connect(addr)
             .await

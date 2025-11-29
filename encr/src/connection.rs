@@ -43,9 +43,9 @@ impl NoEncryptConnection {
 
     // This connection should not be used after the handshake is done.
     // We consume it to only use the encrypted connection going ahead.
-    pub(crate) fn consume<T: Encode + Decode<()>>(
+    pub(crate) fn consume<S: Encode, R: Decode<()>>(
         self,
-    ) -> (EncryptedSender<T>, EncryptedReceiver<T>) {
+    ) -> (EncryptedSender<S>, EncryptedReceiver<R>) {
         let Self {
             mut transport,
             stream,
@@ -109,20 +109,20 @@ enum EncryptionRequestType {
     Decrypt,
 }
 
-pub struct EncryptedSender<T: Encode> {
+pub struct EncryptedSender<S: Encode> {
     encryption_sender: mpsc::UnboundedSender<EncryptionRequest>,
     tcp_sender: futures::stream::SplitSink<Framed<TcpStream, LengthDelimitedCodec>, Bytes>,
-    marker: PhantomData<T>,
+    marker: PhantomData<S>,
 }
 
-pub struct EncryptedReceiver<T: Decode<()>> {
+pub struct EncryptedReceiver<R: Decode<()>> {
     encryption_sender: mpsc::UnboundedSender<EncryptionRequest>,
     tcp_receiver: futures::stream::SplitStream<Framed<TcpStream, LengthDelimitedCodec>>,
-    marker: PhantomData<T>,
+    marker: PhantomData<R>,
 }
 
-impl<T: Encode> EncryptedSender<T> {
-    pub async fn send(&mut self, msg: &T) -> Result<()> {
+impl<S: Encode> EncryptedSender<S> {
+    pub async fn send(&mut self, msg: &S) -> Result<()> {
         let encoded = bincode::encode_to_vec(msg, bincode::config::standard())
             .context("Failed to encode message")?;
 
@@ -148,8 +148,8 @@ impl<T: Encode> EncryptedSender<T> {
     }
 }
 
-impl<T: Decode<()>> EncryptedReceiver<T> {
-    pub async fn recv(&mut self) -> Result<T> {
+impl<R: Decode<()>> EncryptedReceiver<R> {
+    pub async fn recv(&mut self) -> Result<R> {
         let encrypted = self
             .tcp_receiver
             .next()
@@ -171,7 +171,7 @@ impl<T: Decode<()>> EncryptedReceiver<T> {
             .await
             .context("Decryption task dropped response")??;
 
-        let (msg, _) = bincode::decode_from_slice::<T, _>(&raw_data, bincode::config::standard())
+        let (msg, _) = bincode::decode_from_slice::<R, _>(&raw_data, bincode::config::standard())
             .context("Failed to decode message")?;
 
         Ok(msg)

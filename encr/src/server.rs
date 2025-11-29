@@ -2,26 +2,27 @@ use crate::connection::{EncryptedReceiver, EncryptedSender, NoEncryptConnection}
 use anyhow::{Context, Result};
 use bincode::{Decode, Encode};
 use snow::Builder;
-use std::marker::PhantomData;
 use std::sync::LazyLock;
+use std::{marker::PhantomData, net::SocketAddr};
 use tokio::net::{TcpListener, TcpStream};
 use tokio_util::codec::{Framed, LengthDelimitedCodec};
 
 static PARAMS: LazyLock<snow::params::NoiseParams> =
     LazyLock::new(|| "Noise_XX_25519_ChaChaPoly_BLAKE2s".parse().unwrap());
 
-pub struct EncryptedServer<T: Encode + Decode<()>> {
+pub struct EncryptedServer<S: Encode, R: Decode<()>> {
     listener: TcpListener,
     static_key: Vec<u8>,
-    _phantom: PhantomData<T>,
+    _phantom_send: PhantomData<S>,
+    _phantom_receive: PhantomData<R>,
 }
 
-pub struct ClientConnection<T: Encode + Decode<()>> {
-    pub sender: EncryptedSender<T>,
-    pub receiver: EncryptedReceiver<T>,
+pub struct ClientConnection<S: Encode, R: Decode<()>> {
+    pub sender: EncryptedSender<S>,
+    pub receiver: EncryptedReceiver<R>,
 }
 
-impl<T: Encode + Decode<()>> EncryptedServer<T> {
+impl<S: Encode, R: Decode<()>> EncryptedServer<S, R> {
     pub async fn bind(addr: &str) -> Result<Self> {
         let listener = TcpListener::bind(addr)
             .await
@@ -33,18 +34,19 @@ impl<T: Encode + Decode<()>> EncryptedServer<T> {
         Ok(Self {
             listener,
             static_key,
-            _phantom: PhantomData,
+            _phantom_send: PhantomData,
+            _phantom_receive: PhantomData,
         })
     }
 
-    pub async fn accept(&self) -> Result<ClientConnection<T>> {
+    pub async fn accept(&self) -> Result<(ClientConnection<S, R>, SocketAddr)> {
         let (stream, addr) = self.listener.accept().await?;
         println!("New connection from: {}", addr);
 
         let connection = Self::perform_handshake(stream, &self.static_key).await?;
         let (sender, receiver) = connection.consume();
 
-        Ok(ClientConnection { sender, receiver })
+        Ok((ClientConnection { sender, receiver }, addr))
     }
 
     async fn perform_handshake(
