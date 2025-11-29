@@ -213,6 +213,7 @@ impl ServerUno {
                                     "Received message from user when not turn {} : {action:?}",
                                     msg.user_id
                                 );
+                                continue;
                             }
 
                             let card = self.deck.pickup();
@@ -264,6 +265,8 @@ impl ServerUno {
                         if self.start_state != GameStartState::Setup {
                             self.bust_users.push((user.id, user.name));
                         }
+
+                        self.turn_from_leaver(user_idx);
                     } else if let Some((_, user)) = self
                         .finished_users
                         .iter()
@@ -284,6 +287,8 @@ impl ServerUno {
                     let _x =
                         service_sender.send(ServerIntraMessage::UserLeftGame(msg.user_id, self.id));
                     let _x = service_sender.send(self.service_update_state());
+
+                    self.update_user_state();
                 }
             }
 
@@ -387,17 +392,17 @@ impl ServerUno {
             }
         }
 
+        let curr_user = &mut self.active_users[self.user_turn as usize];
+
+        if curr_user.id != user {
+            return Err(anyhow!("Not this user's turn"));
+        }
+
         let (_, curr_colour, curr_value) = self.last_card.decode();
 
         // Black cards can be played on anything, just need to check regular cards
         if !card.is_black() && curr_colour != colour && curr_value != value {
             return Err(anyhow!("Card not allowed"));
-        }
-
-        let curr_user = &mut self.active_users[self.user_turn as usize];
-
-        if curr_user.id != user {
-            return Err(anyhow!("Not this user's turn"));
         }
 
         // I don't really like this implementation but I cba to think of
@@ -444,6 +449,9 @@ impl ServerUno {
                 }
                 UnoCardPower::Reverse => {
                     self.is_ord = !self.is_ord;
+                    if self.active_users.len() == 2 {
+                        self.push_turn();
+                    }
                     self.push_turn();
                 }
                 UnoCardPower::PlusFour => {
@@ -500,29 +508,50 @@ impl ServerUno {
         self.turn_from_leaver(user_idx);
     }
 
+    /// In reality, on 1 user ever goes bust at one time.
+    /// this can be optimised to skip the loop but I'd rather eat the
+    /// tiny overhead for it to be more robust
     fn check_user_bust(&mut self) {
-        let mut leavers = vec![];
-        let mut i: usize = 0;
-        self.active_users.retain(|user| {
-            i += 1;
-            if user.cards.len() <= 20 {
-                true
-            } else {
-                // Need to remove user here
-                println!("USER BUST {}", user.name);
-                self.action.push(UnoAction::UserBust(user.name.clone()));
-                self.bust_users.push((user.id, user.name.clone()));
-                leavers.push(i - 1);
-                for card in user.cards.iter() {
-                    self.deck.discard(*card);
-                }
-                false
-            }
-        });
+        let curr_idx = self.user_turn as usize;
 
-        for leaver in leavers {
-            self.turn_from_leaver(leaver);
+        let busted_indices: Vec<usize> = self
+            .active_users
+            .iter()
+            .enumerate()
+            .filter(|(_, user)| user.cards.len() > 20)
+            .map(|(idx, _)| idx)
+            .collect();
+
+        if busted_indices.is_empty() {
+            return;
         }
+
+        let mut removed_before_turn = 0;
+        for &idx in busted_indices.iter().rev() {
+            let user = self.active_users.remove(idx);
+
+            println!("USER BUST {}", user.name);
+            self.action.push(UnoAction::UserBust(user.name.clone()));
+            self.bust_users.push((user.id, user.name.clone()));
+
+            for card in user.cards.iter() {
+                self.deck.discard(*card);
+            }
+
+            if idx < curr_idx {
+                removed_before_turn += 1;
+            }
+        }
+
+        if removed_before_turn > 0 {
+            self.user_turn = self.user_turn.saturating_sub(removed_before_turn as u8);
+        }
+
+        if self.user_turn as usize >= self.active_users.len() && !self.active_users.is_empty() {
+            self.user_turn = (self.active_users.len() - 1) as u8;
+        }
+
+        self.check_over();
     }
 
     fn turn_from_leaver(&mut self, user_idx: usize) {

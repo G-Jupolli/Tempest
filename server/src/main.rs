@@ -241,14 +241,36 @@ impl TempestServer {
                     }
                 }
                 ServerIntraMessage::Disconnected(socket_addr) => {
-                    users.retain(|_, user| {
-                        if user.addr == socket_addr {
-                            println!("Disconnect User {user:?}");
-                            false
-                        } else {
-                            true
+                    if let Some((user_id, user)) =
+                        users.iter().find(|(_, user)| user.addr == socket_addr)
+                    {
+                        let user_id = *user_id;
+                        let game_id = user.game_id;
+
+                        println!(
+                            "Disconnect User~{user_id}: {} game: {:?}",
+                            user.name, game_id
+                        );
+
+                        if let Some(game_id) = game_id {
+                            if let Some(game) = games.get(&game_id) {
+                                let _ = game.channel.send(GameServerMessage {
+                                    user_id,
+                                    command: ServerGameCommand::Cmd(ClientGameCommand::Leave),
+                                }).inspect_err(|err| {
+                                    println!("Failed to send leave message to game {game_id} for disconnected user {user_id}: {err:?}");
+                                });
+                            }
                         }
-                    });
+                    } else {
+                        println!(
+                            "Received User Leave message for addr {socket_addr} but no user exists "
+                        );
+                    }
+
+                    users.retain(|_, user| user.addr != socket_addr);
+
+                    let _ = event_sender.send(ServerIntraMessage::UpdateUserLobbies);
                 }
                 ServerIntraMessage::UpdateGameServer(id, updated) => {
                     let Some(game) = games.get_mut(&id) else {
