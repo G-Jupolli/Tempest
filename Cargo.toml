@@ -7,10 +7,6 @@ anyhow = "1.0.99"
 bincode = "2.0.1"
 futures = "0.3.31"
 
-[workspace.dependencies.serde]
-version = "1.0.219"
-features = ["derive"]
-
 [workspace.dependencies.tokio]
 version = "1.47.1"
 features = ["full"]

@@ -209,11 +209,10 @@ dependencies = [
  "bincode",
  "color-eyre",
  "crossterm",
- "futures",
+ "encr",
  "ratatui",
  "rpc",
  "tokio",
- "tokio-util",
 ]
 
 [[package]]
@@ -941,11 +940,7 @@ dependencies = [
 name = "rpc"
 version = "0.1.0"
 dependencies = [
- "anyhow",
  "bincode",
- "futures",
- "tokio",
- "tokio-util",
 ]
 
 [[package]]
@@ -1026,12 +1021,10 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "bincode",
- "futures",
+ "encr",
  "rand",
  "rpc",
- "serde",
  "tokio",
- "tokio-util",
  "util",
 ]
 
